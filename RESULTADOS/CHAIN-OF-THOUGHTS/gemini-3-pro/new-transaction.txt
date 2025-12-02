@@ -1,0 +1,273 @@
+Aqui está o processo completo de Chain of Thought para a criação do teste new-transaction.spec.ts, desenhado especificamente para o projeto cypress-realworld-app.
+
+ANÁLISE
+Contexto do Projeto:
+
+O projeto usa React com XState para gerenciamento de estado.
+
+Possui custom commands definidos em cypress/support/commands.ts (ex: getBySel, getBySelLike, login).
+
+A estrutura de diretórios separa testes de UI em cypress/tests/ui.
+
+Os seletores de teste (data-test) estão bem definidos nos componentes (ex: TransactionCreateStepOne.tsx, TransactionCreateStepTwo.tsx).
+
+Estrutura do Teste:
+
+Arquivo: new-transaction.spec.ts.
+
+Describe: "New Transaction".
+
+Pre-requisitos: Banco de dados "seedado" e usuário logado.
+
+Imports Necessários:
+
+Preciso da interface User de ../../src/models para tipar as variáveis de usuário.
+
+Seletores Chave (Mapeamento Mental):
+
+Botão Novo: nav-top-new-transaction
+
+Input Busca Usuário: user-list-search-input
+
+Item da Lista de Usuário: user-list-item-*
+
+Input Valor: transaction-create-amount-input
+
+Input Nota: transaction-create-description-input
+
+Botão Pagar: transaction-create-submit-payment
+
+Botão Requisitar: transaction-create-submit-request
+
+Saldo do Usuário: sidenav-user-balance
+
+PLANEJAMENTO
+"Vou planejar a estrutura completa do arquivo spec..."
+
+Setup (beforeEach):
+
+Rodar a task db:seed para garantir dados limpos.
+
+Interceptar rotas de API críticas (users, transactions) para esperar a conclusão das requisições.
+
+Login programático. Vou recuperar dois usuários do banco via cy.database: um sender (remetente) e um receiver (destinatário).
+
+Fazer login com o sender.
+
+Cenários de Teste (6 Testes):
+
+Teste 1 - Navegação: Garantir que clicar em "New" leva para a URL /transaction/new.
+
+Teste 2 - Fluxo de Pagamento: E2E completo de pagamento. Buscar usuário -> Selecionar -> Preencher Valor/Nota -> Pagar -> Verificar Sucesso.
+
+Teste 3 - Fluxo de Requisição: Similar ao pagamento, mas clicando no botão "Request".
+
+Teste 4 - Validação de Campos: Tentar submeter sem valor ou nota e verificar se os botões estão desabilitados ou se mensagens de erro aparecem.
+
+Teste 5 - Atualização de Saldo: Verificar se, após um pagamento, o saldo exibido na sidebar foi debitado corretamente.
+
+Teste 6 - Criar Outra Transação: Verificar o fluxo de sucesso seguido do botão "Create Another Transaction", garantindo que o form é resetado.
+
+Estratégia de Implementação:
+
+Usar cy.getBySel() extensivamente.
+
+Usar template literals para seletores dinâmicos.
+
+Usar aliases (.as()) para os usuários recuperados.
+
+IMPLEMENTAÇÃO
+Implementando teste [Setup]...
+
+Objetivo: Preparar o ambiente.
+
+Código: cy.task("db:seed"), cy.server(), cy.route(...). Recuperar usuários com cy.database("find", "users").
+
+Implementando teste [Navegação]...
+
+Objetivo: Verificar botão "New".
+
+Código: Clicar em nav-top-new-transaction, assert URL.
+
+Implementando teste [Pagamento e Requisição]...
+
+Objetivo: Fluxo principal.
+
+Estratégia: Criar uma função auxiliar ou escrever o fluxo linearmente pois é curto. Busca pelo receiver.firstName, clica, preenche amount e description.
+
+Implementando teste [Validação]...
+
+Objetivo: Checar inputs inválidos.
+
+Estratégia: Tocar nos campos, clicar fora, verificar classes de erro ou estado disabled do botão submit. Olhando TransactionCreateStepTwo.tsx, o botão tem disabled={!isValid || isSubmitting}.
+
+Implementando teste [Saldo]...
+
+Objetivo: Matemática do Dinero.js.
+
+Estratégia: Ler o saldo inicial (sidenav-user-balance), limpar formatação (remover $ e ,), converter para float. Fazer a transação. Ler saldo final. Comparar.
+
+Implementando teste [Fluxo Contínuo]...
+
+Objetivo: "Create Another".
+
+Estratégia: Completar transação -> Clicar new-transaction-create-another-transaction -> Verificar se input de busca está visível.
+
+VALIDAÇÃO
+"Revisando sintaxe e padrões..."
+
+O uso de cy.getBySelLike é útil para itens de lista dinâmicos.
+
+A confirmação de sucesso no App dispara um Snackbar. Vou verificar alert-bar-success.
+
+O input de valor usa react-number-format. Ao digitar "50", ele formata para "$50". O teste deve digitar apenas números.
+
+CÓDIGO FINAL COMPLETO
+Aqui está o arquivo spec completo, pronto para ser inserido em cypress/tests/ui/new-transaction.spec.ts.
+
+
+import { User } from "../../src/models";
+
+describe("New Transaction", () => {
+  let sender: User;
+  let receiver: User;
+
+  beforeEach(() => {
+    // 1. Seed database to ensure clean state
+    cy.task("db:seed");
+
+    // 2. Setup server routing handling for wait commands
+    cy.server();
+    cy.route("POST", "/transactions").as("createTransaction");
+    cy.route("GET", "/users").as("allUsers");
+    cy.route("GET", "/users/search*").as("usersSearch");
+    cy.route("GET", "/notifications").as("notifications");
+    cy.route("GET", "/bankAccounts").as("bankAccounts");
+
+    // 3. Fetch users dynamically from the seeded database
+    cy.database("find", "users").then((user: User) => {
+      sender = user;
+      
+      // Get a different user for the receiver
+      cy.database("filter", "users").then((users: User[]) => {
+        receiver = users.find((u) => u.id !== sender.id)!;
+        
+        // 4. Login with the sender account
+        cy.login(sender.username, "s3cret");
+      });
+    });
+  });
+
+  it("navigates to the new transaction form", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    cy.location("pathname").should("eq", "/transaction/new");
+  });
+
+  it("creates a new transaction (payment)", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+
+    // Step 1: Select Receiver
+    cy.getBySel("user-list-search-input").type(receiver.firstName);
+    cy.wait("@usersSearch");
+    cy.getBySelLike("user-list-item").contains(receiver.firstName).click();
+
+    // Step 2: Fill Amount and Note
+    cy.getBySel("transaction-create-amount-input").type("50");
+    cy.getBySel("transaction-create-description-input").type("Pizza money");
+
+    // Step 3: Submit Payment
+    cy.getBySel("transaction-create-submit-payment").click();
+
+    // Verification
+    cy.wait("@createTransaction");
+    cy.getBySel("alert-bar-success").should("be.visible").and("contain", "Transaction Submitted!");
+  });
+
+  it("creates a new transaction (request)", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+
+    // Step 1: Select Receiver
+    cy.getBySel("user-list-search-input").type(receiver.firstName);
+    cy.wait("@usersSearch");
+    cy.getBySelLike("user-list-item").contains(receiver.firstName).click();
+
+    // Step 2: Fill Amount and Note
+    cy.getBySel("transaction-create-amount-input").type("100");
+    cy.getBySel("transaction-create-description-input").type("Consulting fee");
+
+    // Step 3: Submit Request
+    cy.getBySel("transaction-create-submit-request").click();
+
+    // Verification
+    cy.wait("@createTransaction");
+    cy.getBySel("alert-bar-success").should("be.visible").and("contain", "Transaction Submitted!");
+  });
+
+  it("validates form inputs (disables submit button)", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+
+    // Select User
+    cy.getBySel("user-list-search-input").type(receiver.firstName);
+    cy.wait("@usersSearch");
+    cy.getBySelLike("user-list-item").contains(receiver.firstName).click();
+
+    // Case 1: Empty inputs
+    cy.getBySel("transaction-create-submit-payment").should("be.disabled");
+    cy.getBySel("transaction-create-submit-request").should("be.disabled");
+
+    // Case 2: Only amount filled
+    cy.getBySel("transaction-create-amount-input").type("50");
+    cy.getBySel("transaction-create-submit-payment").should("be.disabled");
+
+    // Case 3: Both filled (Valid)
+    cy.getBySel("transaction-create-description-input").type("Dinner");
+    cy.getBySel("transaction-create-submit-payment").should("not.be.disabled");
+  });
+
+  it("deducts the amount from user balance after payment", () => {
+    // 1. Get initial balance
+    cy.getBySel("sidenav-user-balance").then(($balance) => {
+      const oldBalance = parseFloat($balance.text().replace(/\$|,/g, ""));
+      const transactionAmount = 50;
+
+      // 2. Perform Transaction
+      cy.getBySel("nav-top-new-transaction").click();
+      cy.getBySel("user-list-search-input").type(receiver.firstName);
+      cy.wait("@usersSearch");
+      cy.getBySelLike("user-list-item").contains(receiver.firstName).click();
+      
+      cy.getBySel("transaction-create-amount-input").type(String(transactionAmount));
+      cy.getBySel("transaction-create-description-input").type("Balance Check");
+      cy.getBySel("transaction-create-submit-payment").click();
+      
+      cy.wait("@createTransaction");
+
+      // 3. Verify new balance
+      cy.getBySel("sidenav-user-balance").should(($newBalance) => {
+        const newBalance = parseFloat($newBalance.text().replace(/\$|,/g, ""));
+        expect(newBalance).to.equal(oldBalance - transactionAmount);
+      });
+    });
+  });
+
+  it("resets the form when 'Create Another Transaction' is clicked", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+
+    // Complete first transaction
+    cy.getBySel("user-list-search-input").type(receiver.firstName);
+    cy.wait("@usersSearch");
+    cy.getBySelLike("user-list-item").contains(receiver.firstName).click();
+    
+    cy.getBySel("transaction-create-amount-input").type("25");
+    cy.getBySel("transaction-create-description-input").type("First txn");
+    cy.getBySel("transaction-create-submit-payment").click();
+    cy.wait("@createTransaction");
+
+    // Click "Create Another"
+    cy.getBySel("new-transaction-create-another-transaction").click();
+
+    // Verify we are back at Step 1 (User Search)
+    cy.getBySel("user-list-search-input").should("be.visible");
+    cy.getBySel("user-list-search-input").should("have.value", "");
+  });
+});

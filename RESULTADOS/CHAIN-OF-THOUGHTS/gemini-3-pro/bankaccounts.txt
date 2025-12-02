@@ -1,0 +1,183 @@
+ANÁLISE
+Para criar o teste de aceitação completo para bankaccounts.spec.ts, analisei a estrutura do projeto fornecido:
+
+Localização do arquivo: cypress/tests/ui/bankaccounts.spec.ts.
+
+Contexto do Frontend:
+
+As views são renderizadas em /bankaccounts (Lista) e /bankaccounts/new (Criação).
+
+Seletores Chave (Data-Test Attributes):
+
+Lista: bankaccount-list, bankaccount-list-item-<id>.
+
+Botões: bankaccount-new (Criar), bankaccount-delete (Deletar), bankaccount-submit (Salvar).
+
+Inputs: bankaccount-bankName-input, bankaccount-routingNumber-input, bankaccount-accountNumber-input.
+
+Erros de validação: O formulário usa Formik + Yup, exibindo erros no helperText do Material UI.
+
+Contexto do Backend:
+
+Rotas API: GET /bankAccounts, POST /bankAccounts, DELETE /bankAccounts/:id.
+
+Comandos de Suporte (cypress/support/commands.ts):
+
+loginByApi(username): Essencial para autenticar sem passar pela UI de login repetidamente.
+
+getBySel(selector): Wrapper para cy.get('[data-test=...]').
+
+task('db:seed'): Necessário para resetar o estado antes de cada teste.
+
+PLANEJAMENTO
+Estrutura do Teste:
+
+beforeEach:
+
+Resetar o banco de dados (db:seed).
+
+Interceptar as chamadas de API (GET, POST, DELETE) para evitar flakiness e garantir que a UI só seja testada após o retorno do backend.
+
+Logar via API com um usuário padrão do seed (ex: "Katharina_Bernier", comum neste projeto).
+
+Navegar para a rota /bankaccounts.
+
+Grupo 1: Listagem:
+
+Verificar se a lista é carregada e se o botão de criar está visível.
+
+Grupo 2: Criação (Happy Path):
+
+Clicar em "Create".
+
+Preencher os dados (Nome do banco, Routing Number, Conta).
+
+Submeter.
+
+Validar redirecionamento e presença do novo item na lista.
+
+Grupo 3: Validação de Formulário (Sad Path):
+
+Tentar submeter formulário vazio.
+
+Verificar mensagens de erro (ex: "Enter a bank name").
+
+Verificar validação de tamanho do Routing Number (deve ter 9 dígitos, conforme BankAccountForm.tsx).
+
+Grupo 4: Exclusão (Soft Delete):
+
+Identificar um item existente.
+
+Clicar em deletar.
+
+Confirmar que o item foi removido visualmente da lista (marcado como deletado ou removido do DOM dependendo da implementação da lista, neste caso o componente BankAccountList filtra visualmente ou o BankAccountItem permite soft delete).
+
+IMPLEMENTAÇÃO
+Implementando o código seguindo as convenções do projeto (uso de getBySel, TypeScript, e padrões Cypress).
+
+Estratégia de Seletores: Usarei cy.getBySel para interagir com elementos que possuem data-test. Para validação de erros do Formik/MaterialUI, verificarei o texto contido nos inputs que possuem estado de erro (aria-invalid="true" ou via texto direto).
+
+VALIDAÇÃO
+Syntax Check: Uso correto de aspas, ponto e vírgula e tipagem básica implícita.
+
+API Interception: Garanti que todos os cy.wait correspondem aos cy.intercept definidos.
+
+Dados: Os dados de teste (Routing number, etc) devem respeitar o Schema do Yup definido em BankAccountForm.tsx (ex: Routing number deve ter 9 caracteres).
+
+ENTREGA
+
+Segue o código final completo para o arquivo.
+
+import { User } from "../../../src/models";
+
+describe("Bank Accounts", () => {
+  const testUser = "Katharina_Bernier";
+
+  beforeEach(() => {
+    cy.task("db:seed");
+    
+    // Intercept API requests
+    cy.intercept("GET", "/bankAccounts").as("getBankAccounts");
+    cy.intercept("POST", "/bankAccounts").as("createBankAccount");
+    cy.intercept("DELETE", "/bankAccounts/*").as("deleteBankAccount");
+
+    // Login via API and visit page
+    cy.loginByApi(testUser).then(() => {
+      cy.visit("/bankaccounts");
+    });
+  });
+
+  it("renders the bank accounts list", () => {
+    cy.wait("@getBankAccounts");
+    cy.getBySel("bankaccount-list").should("be.visible");
+    cy.getBySel("bankaccount-new").should("be.visible");
+  });
+
+  it("creates a new bank account", () => {
+    cy.wait("@getBankAccounts");
+    
+    cy.getBySel("bankaccount-new").click();
+    
+    // Assert URL redirect
+    cy.location("pathname").should("eq", "/bankaccounts/new");
+
+    // Fill form
+    cy.getBySel("bankaccount-bankName-input").type("Cypress Test Bank");
+    cy.getBySel("bankaccount-routingNumber-input").type("123456789");
+    cy.getBySel("bankaccount-accountNumber-input").type("987654321");
+
+    cy.getBySel("bankaccount-submit").click();
+
+    // Wait for API and redirect
+    cy.wait("@createBankAccount");
+    cy.location("pathname").should("eq", "/bankaccounts");
+
+    // Verify new account is in the list
+    cy.getBySel("bankaccount-list").should("contain", "Cypress Test Bank");
+  });
+
+  it("displays form validation errors", () => {
+    cy.wait("@getBankAccounts");
+    cy.getBySel("bankaccount-new").click();
+
+    // Submit empty form to trigger required validations
+    cy.getBySel("bankaccount-submit").click();
+
+    // Check specific validation messages defined in BankAccountForm.tsx validationSchema
+    cy.getBySel("bankaccount-bankName-input").should("have.attr", "aria-invalid", "true");
+    cy.contains("Enter a bank name").should("be.visible");
+
+    cy.getBySel("bankaccount-routingNumber-input").should("have.attr", "aria-invalid", "true");
+    cy.contains("Enter a valid bank routing number").should("be.visible");
+
+    cy.getBySel("bankaccount-accountNumber-input").should("have.attr", "aria-invalid", "true");
+    cy.contains("Enter a valid bank account number").should("be.visible");
+
+    // Test specific length validation (Routing Number must be 9 chars)
+    cy.getBySel("bankaccount-routingNumber-input").type("123");
+    cy.getBySel("bankaccount-submit").click();
+    cy.contains("Must contain a valid routing number").should("be.visible");
+  });
+
+  it("soft deletes a bank account", () => {
+    cy.wait("@getBankAccounts");
+
+    // Ensure there is at least one item to delete and verify its initial state
+    cy.getBySel("bankaccount-list").children().its("length").should("be.gt", 0);
+
+    // Click the delete button of the first item
+    cy.getBySel("bankaccount-delete").first().click();
+
+    cy.wait("@deleteBankAccount");
+
+    // Verify the item is marked as deleted visually
+    // Based on BankAccountItem.tsx logic: {bankAccount.isDeleted ? "(Deleted)" : undefined}
+    cy.getBySel("bankaccount-list").should("contain", "(Deleted)");
+    
+    // Ensure the delete button is no longer visible for that item
+    // Based on logic: {!bankAccount.isDeleted && (<Button ... />)}
+    cy.getBySel("bankaccount-list-item-").first().within(() => {
+        cy.getBySel("bankaccount-delete").should("not.exist");
+    });
+  });
+});

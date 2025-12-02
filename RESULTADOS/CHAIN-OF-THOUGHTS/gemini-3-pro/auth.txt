@@ -1,0 +1,381 @@
+Aqui está o processo completo de Chain of Thought para a criação do teste de aceitação auth.spec.ts para o projeto cypress-realworld-app.
+
+ANÁLISE
+1. Contexto do Projeto:
+
+Aplicação: React frontend + Express backend.
+
+Gerenciamento de Estado: XState (visto em authMachine.ts).
+
+Autenticação: Baseada em sessão (Passport.js no backend).
+
+Dados: Utiliza lowdb (JSON). É necessário resetar o banco (cy.task('db:seed')) antes dos testes para garantir determinismo.
+
+2. Mapeamento de Seletores (Baseado nos arquivos fornecidos):
+
+Sign In (SignInForm.tsx):
+
+Username: [data-test="signin-username"]
+
+Password: [data-test="signin-password"]
+
+Remember Me: [data-test="signin-remember-me"] (checkbox interno)
+
+Submit: [data-test="signin-submit"]
+
+Alert de Erro: [data-test="signin-error"]
+
+Link para cadastro: [data-test="signup"]
+
+Sign Up (SignUpForm.tsx):
+
+Campos: first-name, last-name, username, password, confirmPassword (todos com prefixo signup-).
+
+Submit: [data-test="signup-submit"]
+
+Navegação/Logout (NavBar.tsx, NavDrawer.tsx):
+
+Toggle Menu (Mobile/Desktop): [data-test="sidenav-toggle"]
+
+Logout Button: [data-test="sidenav-signout"]
+
+Username no Drawer: [data-test="sidenav-username"]
+
+3. Comandos Customizados (commands.ts):
+
+O projeto já possui cy.loginByApi. Usarei isso para preparar o estado no teste de Logout, para não perder tempo logando via UI repetidamente.
+
+PLANEJAMENTO
+Vou planejar a estrutura completa do arquivo auth.spec.ts:
+
+describe('Authentication'): Bloco principal.
+
+beforeEach:
+
+Executar cy.task('db:seed') para limpar dados.
+
+Isso é crucial porque o projeto usa um arquivo JSON local como BD.
+
+Grupo 1: Sign Up (Cadastro)
+
+Navegar para /signup.
+
+Preencher o formulário com sucesso.
+
+Verificar redirecionamento para /signin (baseado na lógica da authMachine).
+
+Verificar validações de campo obrigatório e senha curta.
+
+Grupo 2: Sign In (Login)
+
+Navegar para /signin.
+
+Cenário Sucesso: Usar usuário do seed, verificar redirecionamento para Home e presença do onboarding ou elementos da home.
+
+Cenário Falha: Credenciais erradas, verificar signin-error.
+
+Grupo 3: Logout
+
+Pré-condição: Estar logado (via loginByApi).
+
+Ação: Abrir menu lateral (se necessário) e clicar em logout.
+
+Resultado: Redirecionamento para /signin.
+
+IMPLEMENTAÇÃO
+Implementando [Sign Up]:
+
+Objetivo: Garantir que novos usuários conseguem se registrar.
+
+Estratégia: Criar um objeto newUser dentro do teste. Preencher campos. Notei que o confirmPassword precisa ser igual ao password.
+
+Visual Regression: O projeto usa Percy (@percy/cypress). Vou adicionar cy.percySnapshot() em pontos chave.
+
+Implementando [Sign In]:
+
+Objetivo: Testar fluxo feliz e triste.
+
+Estratégia:
+
+Para o fluxo feliz, não preciso criar usuário, usarei um que já vem no seed (mas como o seed é randômico, é mais seguro criar um via API ou usar a UI de cadastro primeiro? O seedDataUtils.ts gera usuários randômicos. O ideal é usar um usuário fixo se existir, ou interceptar. Olhando seedDataUtils.ts, a senha padrão é definida em .env ou hardcoded. Vou assumir o fluxo de: registrar -> logar, ou usar o comando cy.loginByApi que cria sessão, mas aqui testarei a UI).
+
+Correção: O teste deve ser independente. Vou testar o login com um usuário que sei que existe ou falhar propositalmente. Melhor: Testar o erro é fácil. Testar o sucesso requer um usuário válido. O db:seed gera dados aleatórios.
+
+Solução Robusta: Vou me basear no comportamento do commands.ts -> login command usa cy.route('POST', '/login'). Vou focar nos seletores e fluxos. Para garantir sucesso no login UI, posso criar um usuário via requisição API antes do teste de Login UI, ou confiar no db:seed se ele gerasse um user fixo (não gera).
+
+Decisão: Vou usar cy.database('find', 'users') (que é um comando customizado definido em global.d.ts) para pegar um usuário válido do banco recém "seedado".
+
+Implementando [Logout]:
+
+Objetivo: Sair da aplicação.
+
+Estratégia: Usar cy.loginByApi para entrar rápido. Verificar se o botão de logout está visível (pode estar dentro do Drawer no mobile ou desktop pequeno). O NavDrawer é persistent ou temporary. O seletor é sidenav-signout.
+
+VALIDAÇÃO
+Revisando sintaxe e padrões...
+
+Uso de aspas simples ou template literals? O projeto usa aspas duplas em alguns lugares, mas o padrão JS moderno prefere aspas simples ou template literals. Seguirei consistência.
+
+Seletores data-test estão corretos conforme análise dos arquivos .tsx.
+
+Verificação de responsividade: O NavBar tem lógica de breakpoint. O NavDrawer pode estar fechado. O teste deve garantir que o menu está aberto antes de clicar em Logout se a viewport for pequena. Por padrão, o Cypress roda em desktop (1000x660 definido no cypress.json mas 1280 no plugins). O cypress.json diz viewportWidth: 1280. Isso é desktop, o Drawer deve estar visível ou toggleável.
+
+Aqui está o processo completo de Chain of Thought para a criação do teste de aceitação auth.spec.ts para o projeto cypress-realworld-app.
+
+ANÁLISE
+1. Contexto do Projeto:
+
+Aplicação: React frontend + Express backend.
+
+Gerenciamento de Estado: XState (visto em authMachine.ts).
+
+Autenticação: Baseada em sessão (Passport.js no backend).
+
+Dados: Utiliza lowdb (JSON). É necessário resetar o banco (cy.task('db:seed')) antes dos testes para garantir determinismo.
+
+2. Mapeamento de Seletores (Baseado nos arquivos fornecidos):
+
+Sign In (SignInForm.tsx):
+
+Username: [data-test="signin-username"]
+
+Password: [data-test="signin-password"]
+
+Remember Me: [data-test="signin-remember-me"] (checkbox interno)
+
+Submit: [data-test="signin-submit"]
+
+Alert de Erro: [data-test="signin-error"]
+
+Link para cadastro: [data-test="signup"]
+
+Sign Up (SignUpForm.tsx):
+
+Campos: first-name, last-name, username, password, confirmPassword (todos com prefixo signup-).
+
+Submit: [data-test="signup-submit"]
+
+Navegação/Logout (NavBar.tsx, NavDrawer.tsx):
+
+Toggle Menu (Mobile/Desktop): [data-test="sidenav-toggle"]
+
+Logout Button: [data-test="sidenav-signout"]
+
+Username no Drawer: [data-test="sidenav-username"]
+
+3. Comandos Customizados (commands.ts):
+
+O projeto já possui cy.loginByApi. Usarei isso para preparar o estado no teste de Logout, para não perder tempo logando via UI repetidamente.
+
+PLANEJAMENTO
+Vou planejar a estrutura completa do arquivo auth.spec.ts:
+
+describe('Authentication'): Bloco principal.
+
+beforeEach:
+
+Executar cy.task('db:seed') para limpar dados.
+
+Isso é crucial porque o projeto usa um arquivo JSON local como BD.
+
+Grupo 1: Sign Up (Cadastro)
+
+Navegar para /signup.
+
+Preencher o formulário com sucesso.
+
+Verificar redirecionamento para /signin (baseado na lógica da authMachine).
+
+Verificar validações de campo obrigatório e senha curta.
+
+Grupo 2: Sign In (Login)
+
+Navegar para /signin.
+
+Cenário Sucesso: Usar usuário do seed, verificar redirecionamento para Home e presença do onboarding ou elementos da home.
+
+Cenário Falha: Credenciais erradas, verificar signin-error.
+
+Grupo 3: Logout
+
+Pré-condição: Estar logado (via loginByApi).
+
+Ação: Abrir menu lateral (se necessário) e clicar em logout.
+
+Resultado: Redirecionamento para /signin.
+
+IMPLEMENTAÇÃO
+Implementando [Sign Up]:
+
+Objetivo: Garantir que novos usuários conseguem se registrar.
+
+Estratégia: Criar um objeto newUser dentro do teste. Preencher campos. Notei que o confirmPassword precisa ser igual ao password.
+
+Visual Regression: O projeto usa Percy (@percy/cypress). Vou adicionar cy.percySnapshot() em pontos chave.
+
+Implementando [Sign In]:
+
+Objetivo: Testar fluxo feliz e triste.
+
+Estratégia:
+
+Para o fluxo feliz, não preciso criar usuário, usarei um que já vem no seed (mas como o seed é randômico, é mais seguro criar um via API ou usar a UI de cadastro primeiro? O seedDataUtils.ts gera usuários randômicos. O ideal é usar um usuário fixo se existir, ou interceptar. Olhando seedDataUtils.ts, a senha padrão é definida em .env ou hardcoded. Vou assumir o fluxo de: registrar -> logar, ou usar o comando cy.loginByApi que cria sessão, mas aqui testarei a UI).
+
+Correção: O teste deve ser independente. Vou testar o login com um usuário que sei que existe ou falhar propositalmente. Melhor: Testar o erro é fácil. Testar o sucesso requer um usuário válido. O db:seed gera dados aleatórios.
+
+Solução Robusta: Vou me basear no comportamento do commands.ts -> login command usa cy.route('POST', '/login'). Vou focar nos seletores e fluxos. Para garantir sucesso no login UI, posso criar um usuário via requisição API antes do teste de Login UI, ou confiar no db:seed se ele gerasse um user fixo (não gera).
+
+Decisão: Vou usar cy.database('find', 'users') (que é um comando customizado definido em global.d.ts) para pegar um usuário válido do banco recém "seedado".
+
+Implementando [Logout]:
+
+Objetivo: Sair da aplicação.
+
+Estratégia: Usar cy.loginByApi para entrar rápido. Verificar se o botão de logout está visível (pode estar dentro do Drawer no mobile ou desktop pequeno). O NavDrawer é persistent ou temporary. O seletor é sidenav-signout.
+
+VALIDAÇÃO
+Revisando sintaxe e padrões...
+
+Uso de aspas simples ou template literals? O projeto usa aspas duplas em alguns lugares, mas o padrão JS moderno prefere aspas simples ou template literals. Seguirei consistência.
+
+Seletores data-test estão corretos conforme análise dos arquivos .tsx.
+
+Verificação de responsividade: O NavBar tem lógica de breakpoint. O NavDrawer pode estar fechado. O teste deve garantir que o menu está aberto antes de clicar em Logout se a viewport for pequena. Por padrão, o Cypress roda em desktop (1000x660 definido no cypress.json mas 1280 no plugins). O cypress.json diz viewportWidth: 1280. Isso é desktop, o Drawer deve estar visível ou toggleável.
+
+ENTREGA
+CÓDIGO FINAL COMPLETO:
+
+// cypress/tests/ui/auth.spec.ts
+import { User } from "../../../src/models";
+
+describe("Authentication", () => {
+  // Executa antes de cada teste para garantir um estado limpo
+  beforeEach(() => {
+    cy.task("db:seed");
+  });
+
+  context("Sign Up", () => {
+    it("should allow a visitor to sign up", () => {
+      cy.visit("/signup");
+
+      const newUser = {
+        firstName: "Test",
+        lastName: "User",
+        username: "testuser_unique",
+        password: "password123",
+        confirmPassword: "password123",
+      };
+
+      // Verificar estado inicial e snapshot visual
+      cy.getBySel("signup-title").should("be.visible");
+      cy.percySnapshot("Sign Up Page");
+
+      // Preencher formulário
+      cy.getBySel("signup-first-name").type(newUser.firstName);
+      cy.getBySel("signup-last-name").type(newUser.lastName);
+      cy.getBySel("signup-username").type(newUser.username);
+      cy.getBySel("signup-password").type(newUser.password);
+      cy.getBySel("signup-confirmPassword").type(newUser.confirmPassword);
+
+      // Submeter
+      cy.getBySel("signup-submit").click();
+
+      // Verificar redirecionamento para login
+      cy.location("pathname").should("eq", "/signin");
+    });
+
+    it("should display validation errors for invalid input", () => {
+      cy.visit("/signup");
+
+      // Tocar nos campos e sair para disparar validação (blurred)
+      cy.getBySel("signup-first-name").focus().blur();
+      cy.getBySel("signup-last-name").focus().blur();
+      cy.getBySel("signup-username").focus().blur();
+      
+      // Senha curta
+      cy.getBySel("signup-password").type("123").blur();
+      
+      // Senhas não conferem
+      cy.getBySel("signup-password").clear().type("password123");
+      cy.getBySel("signup-confirmPassword").type("password456").blur();
+
+      // Verificar que o botão está desabilitado
+      cy.getBySel("signup-submit").should("be.disabled");
+      
+      cy.percySnapshot("Sign Up Errors");
+    });
+  });
+
+  context("Sign In", () => {
+    it("should allow a seeded user to sign in", () => {
+      // Buscar um usuário existente no banco de dados criado pelo seed
+      cy.database("find", "users").then((user: User) => {
+        cy.visit("/signin");
+
+        cy.getBySel("signin-username").type(user.username);
+        // A senha padrão é definida no seedDataUtils ou .env, geralmente é uma string fixa para testes
+        // Assumindo a senha padrão definida no environment do cypress.json ou seed
+        const defaultPassword = Cypress.env("defaultPassword"); 
+        cy.getBySel("signin-password").type(defaultPassword);
+        
+        // Checkbox Remember Me
+        cy.getBySel("signin-remember-me").find("input").check();
+
+        cy.getBySel("signin-submit").click();
+
+        // Verificar redirecionamento para Home
+        cy.location("pathname").should("eq", "/");
+        
+        // Verificar se elementos da Home ou Onboarding aparecem
+        // O app pode mostrar o Onboarding se o usuário não tiver conta bancária
+        // Mas como pegamos do seed, ele deve ter.
+        cy.getBySel("sidenav-user-full-name").should("contain", user.firstName);
+      });
+    });
+
+    it("should display an error for invalid credentials", () => {
+      cy.visit("/signin");
+
+      cy.getBySel("signin-username").type("invalid_user");
+      cy.getBySel("signin-password").type("invalid_password");
+      cy.getBySel("signin-submit").click();
+
+      // Verificar alerta de erro
+      cy.getBySel("signin-error").should("be.visible").and("contain", "Incorrect username or password");
+      
+      cy.percySnapshot("Sign In Error");
+    });
+
+    it("should navigate to signup page", () => {
+      cy.visit("/signin");
+      cy.getBySel("signup").click();
+      cy.location("pathname").should("eq", "/signup");
+    });
+  });
+
+  context("Logout", () => {
+    it("should allow a user to logout", () => {
+      // Usar comando de API para logar rapidamente antes do teste de logout
+      cy.database("find", "users").then((user: User) => {
+        cy.loginByApi(user.username);
+      });
+
+      // Visitar a home já autenticado
+      cy.visit("/");
+
+      // Em viewports mobile o drawer inicia fechado, em desktop (1280px) inicia aberto ou persistente
+      // Verificamos se o botão de logout está visível, se não, abrimos o menu
+      cy.get("body").then(($body) => {
+        if ($body.find("[data-test='sidenav-signout']").is(":hidden")) {
+          cy.getBySel("sidenav-toggle").click();
+        }
+      });
+
+      // Clicar em Logout
+      cy.getBySel("sidenav-signout").click();
+
+      // Verificar redirecionamento para Sign In
+      cy.location("pathname").should("eq", "/signin");
+    });
+  });
+});

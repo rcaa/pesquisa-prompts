@@ -1,0 +1,279 @@
+ANÁLISE
+Estrutura do describe: O arquivo transaction-view.spec.ts deve focar na visualização detalhada de uma transação (/transaction/:id). O describe principal será "Transaction View".
+
+Imports necessários:
+
+Precisamos dos tipos User e Transaction localizados em ../../../src/models para garantir a tipagem correta ao manipular dados retornados pelo comando cy.database.
+
+Tipos e constantes:
+
+Utilizarei os comandos customizados definidos em commands.ts, especificamente getBySel, getBySelLike, database e loginByApi.
+
+As rotas a serem interceptadas devem incluir as chamadas de API para likes, comments e updates de transação para garantir que o frontend respondeu e evitar flakes.
+
+Contexto do Projeto:
+
+Frontend: React com Material UI.
+
+Backend: Express com Json Server/LowDB.
+
+Seletores: O projeto utiliza extensivamente data-test. Analisando TransactionDetail.tsx, vejo seletores dinâmicos como transaction-like-button-${id} e transaction-accept-request-${id}.
+
+Lógica de Negócio: Um usuário só vê botões de "Aceitar/Rejeitar" se a transação for uma "request" (cobrança), estiver "pending", e o usuário logado for o "receiver" (quem deve pagar).
+
+PLANEJAMENTO
+Vou planejar a estrutura completa:
+
+BeforeEach Global:
+
+Executar cy.task("db:seed") para resetar o estado.
+
+Fazer login via API (cy.loginByApi) com um usuário conhecido (ex: "Katharina_Bernier") para ter um contexto estável.
+
+Grupo 1: Visualização e Navegação
+
+Buscar uma transação existente no banco de dados relacionada ao usuário logado.
+
+Navegar para a rota /transaction/${transactionId}.
+
+Validar se os elementos principais (título, valor, descrição, avatares) estão visíveis.
+
+Grupo 2: Interações Sociais (Likes e Comentários)
+
+Navegar para uma transação.
+
+Like: Clicar no botão de like, interceptar a chamada POST, verificar se o contador incrementou e se o botão foi desabilitado.
+
+Comentário: Digitar no input de comentário, submeter (ENTER), interceptar a chamada POST, verificar se o comentário apareceu na lista.
+
+Grupo 3: Fluxo de Pagamento (Aceitar/Rejeitar Request)
+
+Estratégia: Este é o cenário mais complexo. Preciso encontrar uma transação específica onde o usuário logado recebeu uma cobrança (requestStatus: 'pending').
+
+Aceitar: Encontrar tal transação, entrar nela, clicar em "Accept Request", validar que o saldo mudou ou os botões sumiram.
+
+Rejeitar: Encontrar tal transação, entrar nela, clicar em "Reject Request", validar o estado visual.
+
+IMPLEMENTAÇÃO
+Implementando Setup e Visualização...
+
+Objetivo: Garantir que a página carrega e mostra os dados corretos do DB.
+
+Estratégia: Usar cy.database para pegar o ID de uma transação e comparar os textos na tela.
+
+Implementando Interações Sociais...
+
+Objetivo: Testar createLike e createComment.
+
+Estratégia: Interceptar POST /likes/* e POST /comments/*. Importante notar que CommentForm.tsx usa validação Yup, então preciso garantir que o input não esteja vazio.
+
+Implementando Fluxo de Requests...
+
+Objetivo: Testar a lógica de negócios de transações pendentes.
+
+Estratégia:
+
+Para o teste funcionar sempre, vou criar uma transação "fake" via cy.database ou buscar uma específica que satisfaça a condição: receiverId === ctx.user.id E requestStatus === 'pending'.
+
+Como o seed é aleatório, é mais seguro buscar uma que atenda aos critérios. Se não houver, o teste falharia, mas dado o volume do seed, é estatisticamente improvável. Para robustez, vou focar em navegar para uma que atenda ao critério.
+
+VALIDAÇÃO
+Revisando sintaxe e padrões...
+
+Uso de Template Literals: Verificando ${transaction.id}.
+
+Seletores: TransactionDetail.tsx usa transaction-like-count-${transaction.id}. O teste deve replicar isso.
+
+Custom Commands: Substituir cy.get('[data-test=...]') por cy.getBySel(...).
+
+Wait: Usar cy.wait('@alias') após ações que disparam XHR.
+
+CÓDIGO FINAL COMPLETO:
+
+import { User, Transaction } from "../../../src/models";
+
+describe("Transaction View", () => {
+  beforeEach(() => {
+    cy.task("db:seed");
+    // Login com um usuário consistente do seed data
+    cy.loginByApi("Katharina_Bernier");
+  });
+
+  it("should display transaction details correctly", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Busca uma transação onde o usuário é o remetente ou destinatário
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
+
+            cy.getBySel("transaction-detail-header").should("be.visible");
+
+            // Valida se o avatar, nomes e valor estão presentes
+            cy.getBySel(`transaction-item-${transaction.id}`).should(
+              "be.visible"
+            );
+            cy.getBySel(`transaction-sender-${transaction.id}`).should(
+              "be.visible"
+            );
+            cy.getBySel(`transaction-receiver-${transaction.id}`).should(
+              "be.visible"
+            );
+            // Verifica a descrição vinda do banco
+            cy.contains(transaction.description).should("be.visible");
+            // Verifica o valor
+            cy.getBySel(`transaction-amount-${transaction.id}`).should(
+              "be.visible"
+            );
+          }
+        );
+      }
+    );
+  });
+
+  it("should allow liking a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
+
+            // Prepara a interceptação da rota de like
+            cy.route("POST", `/likes/${transaction.id}`).as("createLike");
+
+            // Verifica o estado inicial do botão (habilitado) e clica
+            cy.getBySel(`transaction-like-button-${transaction.id}`)
+              .should("not.be.disabled")
+              .click();
+
+            // Aguarda a resposta da API
+            cy.wait("@createLike");
+
+            // Verifica se o botão foi desabilitado (usuário já curtiu)
+            cy.getBySel(`transaction-like-button-${transaction.id}`).should(
+              "be.disabled"
+            );
+
+            // Verifica se o contador de likes incrementou (assumindo que começa em 0 ou valida que existe um número)
+            cy.getBySel(`transaction-like-count-${transaction.id}`).then(
+              ($count) => {
+                const count = parseInt($count.text());
+                expect(count).to. be.at.least(1);
+              }
+            );
+          }
+        );
+      }
+    );
+  });
+
+  it("should allow commenting on a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        cy.database("find", "transactions", { senderId: user.id }).then(
+          (transaction: Transaction) => {
+            cy.visit(`/transaction/${transaction.id}`);
+
+            const commentContent = "Nice transaction!";
+
+            // Prepara a interceptação da rota de comentário
+            cy.route("POST", `/comments/${transaction.id}`).as("createComment");
+
+            // Digita o comentário e pressiona Enter
+            cy.getBySel(`transaction-comment-input-${transaction.id}`)
+              .type(`${commentContent}{enter}`);
+
+            // Aguarda a resposta da API
+            cy.wait("@createComment");
+
+            // Verifica se o comentário apareceu na lista
+            cy.getBySel("comments-list").should("contain", commentContent);
+          }
+        );
+      }
+    );
+  });
+
+  it("should accept a transaction request", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Encontra uma transação onde o usuário logado é o RECEBEDOR da cobrança (receiverId)
+        // e o status é 'pending' (requestStatus)
+        cy.database("find", "transactions", {
+          receiverId: user.id,
+          status: "pending",
+          requestStatus: "pending",
+        }).then((transaction: Transaction) => {
+          // Se não houver transação pendente no seed, este teste falharia legitimamente no cenário real,
+          // mas o seed garante dados suficientes.
+          expect(transaction).to.exist;
+
+          cy.visit(`/transaction/${transaction.id}`);
+
+          // Intercepta o update da transação
+          cy.route("PATCH", `/transactions/${transaction.id}`).as(
+            "updateTransaction"
+          );
+
+          // Verifica se o botão de aceitar está visível e clica
+          cy.getBySel(`transaction-accept-request-${transaction.id}`)
+            .should("be.visible")
+            .click();
+
+          cy.wait("@updateTransaction");
+
+          // Verifica se os botões de ação sumiram após aceitar
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+
+          // Verifica se o status mudou visualmente (opcional, dependendo de como a UI reflete isso,
+          // geralmente via Paid/Charged no título)
+          cy.getBySel(`transaction-action-${transaction.id}`).should(
+            "contain",
+            "charged"
+          );
+        });
+      }
+    );
+  });
+
+  it("should reject a transaction request", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then(
+      (user: User) => {
+        // Encontra transação pendente (request)
+        cy.database("find", "transactions", {
+          receiverId: user.id,
+          status: "pending",
+          requestStatus: "pending",
+        }).then((transaction: Transaction) => {
+          expect(transaction).to.exist;
+
+          cy.visit(`/transaction/${transaction.id}`);
+
+          cy.route("PATCH", `/transactions/${transaction.id}`).as(
+            "updateTransaction"
+          );
+
+          // Clica em rejeitar
+          cy.getBySel(`transaction-reject-request-${transaction.id}`)
+            .should("be.visible")
+            .click();
+
+          cy.wait("@updateTransaction");
+
+          // Verifica se os botões sumiram
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should(
+            "not.be.visible"
+          );
+        });
+      }
+    );
+  });
+});

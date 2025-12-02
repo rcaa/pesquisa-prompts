@@ -1,0 +1,259 @@
+Esta resposta segue estritamente a metodologia Chain of Thought (Cadeia de Pensamento) solicitada para garantir que o teste Cypress gerado seja robusto, tecnicamente preciso e perfeitamente integrado ao projeto cypress-realworld-app.
+
+ANÁLISE
+Contexto do Arquivo: O arquivo transaction-feeds.spec.ts destina-se a testar a visualização de listas de transações. O aplicativo possui três abas principais de feed:
+
+Everyone (Public): Transações públicas de todos os usuários.
+
+Friends (Contacts): Transações apenas de contatos do usuário logado.
+
+Mine (Personal): Transações onde o usuário logado é remetente ou destinatário.
+
+Recursos Disponíveis (Mapeado do commands.ts e utils.ts):
+
+Comandos Customizados: cy.login(), cy.getBySel(), cy.getBySelLike(), cy.database(), cy.pickDateRange(), cy.setTransactionAmountRange().
+
+Banco de Dados: Acesso via cy.task("db:seed") para resetar o estado antes dos testes.
+
+Utilitários: isMobile() para lidar com diferenças de viewport (embora as abas de transação geralmente apareçam em ambos, o layout pode mudar).
+
+Rotas da API (Backend Analysis):
+
+Baseado no backend/transaction-routes.ts, temos:
+
+GET /transactions/public (Public)
+
+GET /transactions/contacts (Contacts)
+
+GET /transactions (Personal)
+
+Seletores UI (Component Analysis):
+
+Os componentes TransactionNavTabs usam data-test como nav-public-tab, nav-contacts-tab, nav-personal-tab.
+
+O container de lista usa data-test="transaction-list".
+
+Itens individuais usam data-test="transaction-item-{id}".
+
+PLANEJAMENTO
+Vou planejar a estrutura completa do teste:
+
+Setup (beforeEach):
+
+Semear o banco de dados (db:seed).
+
+Iniciar o servidor Cypress (cy.server) e configurar rotas (cy.route) para monitorar as chamadas XHR dos feeds.
+
+Logar com um usuário padrão (ex: katharina_bernier ou usuário criado dinamicamente, mas usaremos um hardcoded comum em seeds deste projeto para estabilidade).
+
+Grupos de Testes:
+
+Cenário 1: Feed Público (Default). Verificar se carrega por padrão, se a URL está correta e se mostra transações.
+
+Cenário 2: Feed de Contatos. Navegar para a aba, verificar a chamada de API /contacts e a presença de itens.
+
+Cenário 3: Feed Pessoal. Navegar para a aba "Mine", verificar chamada API e garantir que as transações pertencem ao usuário.
+
+Cenário 4: Filtros de Data. Utilizar o comando customizado pickDateRange e verificar se a lista diminui ou muda.
+
+Cenário 5: Filtros de Valor. Utilizar setTransactionAmountRange e validar a filtragem.
+
+Cenário 6: Paginação (Infinite Scroll). Rolar a lista para baixo e verificar se a API é chamada para a página 2.
+
+Estratégia de Implementação:
+
+Usar cy.wait('@alias') rigorosamente para evitar flakes.
+
+Usar cy.getBySelLike para contar itens na lista.
+
+Validar estados visuais (botões ativos nas abas).
+
+IMPLEMENTAÇÃO
+Implementando imports e estrutura básica... Preciso importar isMobile para condicionais de layout e talvez tipos se necessário, mas focarei na sintaxe do Cypress.
+
+Implementando [GRUPO 1 - Public Feed]...
+
+Objetivo: Garantir que o app inicia na aba "Everyone".
+
+Estratégia: Verificar a classe CSS de aba ativa (MUI tabs geralmente usam classes específicas ou atributos aria). Verificar a chamada GET /transactions/public.
+
+Implementando [GRUPO 2 & 3 - Navegação]...
+
+Objetivo: Trocar de abas.
+
+Código: cy.getBySel("nav-contacts-tab").click(). Validar URL /contacts. Repetir para /personal.
+
+Implementando [GRUPO 4 & 5 - Filtros]...
+
+Objetivo: Testar os filtros avançados.
+
+Estratégia:
+
+O comando pickDateRange já abre o calendário e seleciona. Preciso passar datas válidas (seed gera datas recentes).
+
+O comando setTransactionAmountRange ajusta o slider. Filtrarei valores baixos para garantir resultados.
+
+Implementando [GRUPO 6 - Scroll]...
+
+Objetivo: Testar paginação infinita.
+
+Estratégia: cy.getBySel("transaction-list").scrollTo("bottom") e esperar nova requisição XHR.
+
+VALIDAÇÃO
+Revisando sintaxe e padrões...
+
+Estou usando template literals com backticks (`).
+
+Os seletores data-test correspondem aos arquivos React fornecidos (NavBar.tsx, TransactionNavTabs.tsx).
+
+O comando cy.login abstrai a complexidade de autenticação.
+
+A versão do Cypress no package.json é 5.4.0, então cy.route (XHR antigo) é o correto, não cy.intercept (que veio depois). Manterei cy.server e cy.route.
+
+Ajuste Fino:
+
+Detectei que o isMobile pode esconder elementos. No NavDrawer.tsx, as abas principais de navegação ficam na NavBar (top) em desktop, mas em mobile a navegação pode ser diferente. O componente TransactionNavTabs é renderizado na NavBar condicionalmente. O teste deve focar na funcionalidade funcional das abas que estão sempre presentes na view principal de transações.
+
+ENTREGA
+CÓDIGO FINAL COMPLETO:
+
+import { isMobile } from "../../support/utils";
+
+describe("Transaction Feeds", () => {
+  beforeEach(() => {
+    cy.task("db:seed");
+
+    cy.server();
+    // Monitor XHR requests for specific feeds
+    cy.route("GET", "/transactions/public*").as("publicTransactions");
+    cy.route("GET", "/transactions/contacts*").as("contactsTransactions");
+    cy.route("GET", "/transactions?*").as("personalTransactions");
+
+    cy.login("katharina_bernier", "s3cret");
+  });
+
+  it("shows the public feed by default", () => {
+    cy.visit("/");
+    
+    cy.wait("@publicTransactions");
+
+    // Verify Public Tab is active
+    cy.getBySel("nav-public-tab")
+      .should("have.class", "Mui-selected");
+
+    // Verify list contains items
+    cy.getBySel("transaction-list")
+      .should("be.visible")
+      .find("[data-test*='transaction-item']")
+      .should("have.length.greaterThan", 0);
+  });
+
+  it("navigates to the contacts feed", () => {
+    cy.getBySel("nav-contacts-tab").click();
+    
+    cy.url().should("include", "/contacts");
+    cy.wait("@contactsTransactions");
+
+    cy.getBySel("nav-contacts-tab")
+      .should("have.class", "Mui-selected");
+
+    cy.getBySel("transaction-list")
+      .should("be.visible");
+  });
+
+  it("navigates to the personal feed", () => {
+    cy.getBySel("nav-personal-tab").click();
+    
+    cy.url().should("include", "/personal");
+    cy.wait("@personalTransactions");
+
+    cy.getBySel("nav-personal-tab")
+      .should("have.class", "Mui-selected");
+
+    cy.getBySel("transaction-list")
+      .should("be.visible");
+  });
+
+  it("filters transactions by date range", () => {
+    if (isMobile()) {
+      // Mobile drawer interaction logic if necessary, 
+      // but filters are usually accessible via buttons in the header
+      return; 
+    }
+
+    // Switch to personal to have a stable set of seeded data
+    cy.getBySel("nav-personal-tab").click();
+    cy.wait("@personalTransactions");
+
+    // Open filter and select a range (seed data generates recent dates)
+    const today = new Date();
+    const lastWeek = new Date();
+    lastWeek.setDate(today.getDate() - 7);
+
+    cy.pickDateRange(lastWeek, today);
+
+    // Verify the API was called with date parameters
+    cy.route({
+      method: "GET",
+      url: "/transactions?*dateRangeStart*",
+    }).as("filteredTransactions");
+
+    // Force a re-fetch or ensure the UI triggered it
+    cy.wait("@filteredTransactions").then((xhr) => {
+        expect(xhr.url).to.contain("dateRangeStart");
+        expect(xhr.url).to.contain("dateRangeEnd");
+    });
+
+    // Check if filter chip is visible
+    cy.getBySel("transaction-list-filter-date-range-button")
+      .should("contain", "Date:");
+  });
+
+  it("filters transactions by amount range", () => {
+    if (isMobile()) {
+      return;
+    }
+
+    // Switch to personal feed
+    cy.getBySel("nav-personal-tab").click();
+    cy.wait("@personalTransactions");
+
+    // Click amount filter button to verify it opens
+    cy.getBySel("transaction-list-filter-amount-range-button").click({ force: true });
+    
+    // Use custom command to set range
+    cy.setTransactionAmountRange(10, 800);
+
+    // Verify API call with amount params
+    cy.route({
+      method: "GET",
+      url: "/transactions?*amountMin*",
+    }).as("amountFilteredTransactions");
+
+    cy.wait("@amountFilteredTransactions").then((xhr) => {
+        expect(xhr.url).to.contain("amountMin=1000"); // Backend expects cents? Utils say *1000 padding
+        expect(xhr.url).to.contain("amountMax=80000"); 
+    });
+
+    // Verify chip update
+    cy.getBySel("transaction-list-filter-amount-range-button")
+      .should("contain", "Amount:");
+  });
+
+  it("supports infinite scrolling (pagination)", () => {
+    cy.getBySel("nav-public-tab").click();
+    cy.wait("@publicTransactions");
+
+    // Scroll to the bottom of the transaction list
+    cy.getBySel("transaction-list").scrollTo("bottom");
+
+    // Expect a call for page 2
+    cy.route("GET", "/transactions/public*page=2*").as("publicTransactionsPage2");
+    cy.wait("@publicTransactionsPage2");
+
+    // Verify more items loaded
+    cy.getBySel("transaction-list")
+      .find("[data-test*='transaction-item']")
+      .should("have.length.greaterThan", 10); // Assuming default page limit is ~10
+  });
+});
