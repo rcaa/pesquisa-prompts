@@ -1,8 +1,7 @@
-# PROMPT ZERO-SHOT - TESTES CYPRESS NOTIFICATIONS
+# PROMPT ZERO-SHOT - TESTES CYPRESS BANK ACCOUNTS
 
 ## OBJETIVO
-
-Gere um arquivo de teste Cypress funcional com cenários de notificações para Real World App.
+Gere um arquivo de teste Cypress funcional com  cenários de contas bancárias para Real World App.
 
 Analise o contexto do projeto para uma perfeita integração do teste.
 

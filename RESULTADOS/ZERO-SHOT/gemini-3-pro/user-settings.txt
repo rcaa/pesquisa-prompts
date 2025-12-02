@@ -1,0 +1,127 @@
+Com base na análise completa da estrutura do seu projeto cypress-realworld-app, especialmente os componentes em src/components/UserSettingsForm.tsx e os comandos personalizados em cypress/support/commands.ts, aqui está o arquivo de teste completo e funcional.
+
+Este arquivo cobre o "Caminho Feliz" (atualização bem-sucedida) e cenários de erro (validação de campos obrigatórios).
+
+Arquivo: cypress/tests/ui/user-settings.spec.ts
+
+import { User } from "../../../src/models";
+
+describe("User Settings", () => {
+  const newFirstName = "Edgar";
+  const newLastName = "Poe";
+  const newEmail = "edgar@poe.com";
+  const newPhoneNumber = "555-555-555";
+
+  beforeEach(() => {
+    // Reseta o banco de dados para garantir um estado limpo
+    cy.task("db:seed");
+
+    // Login com um usuário existente do seed (Katharine McDonald é um usuário padrão do seed)
+    cy.login("kath_mcdonald", "s3cret");
+
+    // Navega para a tela de configurações usando o seletor do NavDrawer
+    cy.getBySel("sidenav-user-settings").click();
+  });
+
+  it("should verify the user settings form renders with correct initial data", () => {
+    // Verifica se o formulário está visível
+    cy.getBySel("user-settings-form").should("be.visible");
+
+    // Verifica se o título está correto
+    cy.get("h2").contains("User Settings").should("be.visible");
+
+    // Verifica se os campos vêm preenchidos (dados iniciais do usuário logado)
+    cy.getBySel("user-settings-firstName-input").should("have.value", "Katharine");
+    cy.getBySel("user-settings-lastName-input").should("have.value", "McDonald");
+    cy.getBySel("user-settings-email-input").should("have.value", "katharine.mcdonald@gmail.com");
+  });
+
+  it("should allow a user to update their profile information", () => {
+    // Atualiza o Primeiro Nome
+    cy.getBySel("user-settings-firstName-input")
+      .clear()
+      .type(newFirstName)
+      .should("have.value", newFirstName);
+
+    // Atualiza o Sobrenome
+    cy.getBySel("user-settings-lastName-input")
+      .clear()
+      .type(newLastName)
+      .should("have.value", newLastName);
+
+    // Atualiza o Email
+    cy.getBySel("user-settings-email-input")
+      .clear()
+      .type(newEmail)
+      .should("have.value", newEmail);
+
+    // Atualiza o Telefone
+    cy.getBySel("user-settings-phoneNumber-input")
+      .clear()
+      .type(newPhoneNumber)
+      .should("have.value", newPhoneNumber);
+
+    // Submete o formulário
+    cy.getBySel("user-settings-submit").should("not.be.disabled").click();
+
+    // Verificação visual: recarrega a página para garantir que os dados persistiram no backend
+    cy.reload();
+
+    // Valida se os dados persistem após o reload
+    cy.getBySel("user-settings-firstName-input").should("have.value", newFirstName);
+    cy.getBySel("user-settings-lastName-input").should("have.value", newLastName);
+    cy.getBySel("user-settings-email-input").should("have.value", newEmail);
+    cy.getBySel("user-settings-phoneNumber-input").should("have.value", newPhoneNumber);
+  });
+
+  it("should show validation errors for required fields", () => {
+    // Limpa o campo First Name e clica fora (blur) para disparar a validação do Formik/Yup
+    cy.getBySel("user-settings-firstName-input").clear().blur();
+    cy.get("#user-settings-firstName-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Enter a first name");
+
+    // Limpa o campo Last Name
+    cy.getBySel("user-settings-lastName-input").clear().blur();
+    cy.get("#user-settings-lastName-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Enter a last name");
+
+    // Limpa o campo Email
+    cy.getBySel("user-settings-email-input").clear().blur();
+    cy.get("#user-settings-email-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Enter an email address");
+
+    // Limpa o campo Telefone
+    cy.getBySel("user-settings-phoneNumber-input").clear().blur();
+    cy.get("#user-settings-phoneNumber-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Enter a phone number");
+
+    // Garante que o botão de salvar está desabilitado quando o formulário é inválido
+    cy.getBySel("user-settings-submit").should("be.disabled");
+  });
+
+  it("should show error for invalid email format", () => {
+    cy.getBySel("user-settings-email-input").clear().type("not-an-email").blur();
+    
+    cy.get("#user-settings-email-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Must contain a valid email address");
+
+    cy.getBySel("user-settings-submit").should("be.disabled");
+  });
+});
+
+
+
+
+Detalhes Técnicos da Integração
+Seletores Customizados: O teste utiliza cy.getBySel("selector") extensivamente. Isso se alinha perfeitamente com o arquivo cypress/support/commands.ts do seu projeto, que mapeia essa função para buscar elementos via [data-test=selector], atributo presente no seu UserSettingsForm.tsx.
+
+Validação de Helper Text: O Material UI gera IDs para textos de ajuda no formato ${id-do-input}-helper-text. O teste utiliza esses IDs (ex: #user-settings-firstName-input-helper-text) para validar as mensagens de erro definidas no seu schema Yup.
+
+Seed Database: O comando cy.task("db:seed") no beforeEach garante que cada teste comece com dados limpos, evitando que a alteração de um teste (ex: mudar o nome para "Edgar") quebre o teste seguinte.
+
+Login Automatizado: Utiliza o comando cy.login definido no seu projeto para autenticar antes de tentar acessar a rota protegida.

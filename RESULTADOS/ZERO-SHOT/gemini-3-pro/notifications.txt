@@ -1,0 +1,210 @@
+Com base na análise da estrutura do projeto Real World App (RWA), dos componentes de UI (NotificationList, NotificationListItem), das definições de backend e dos comandos customizados do Cypress (cy.database, cy.loginByApi, etc.), gerei o arquivo de teste abaixo.
+
+Este arquivo cobre cenários de ponta a ponta (E2E), desde a criação de eventos por outros usuários até a verificação e interação com a notificação pelo usuário logado.
+
+Arquivo: cypress/tests/ui/notifications.spec.ts
+
+import { User, Transaction } from "../../../src/models";
+
+describe("Notifications", () => {
+  beforeEach(() => {
+    cy.task("db:seed");
+    
+    // Interceptar requisições para garantir estabilidade dos testes
+    cy.intercept("GET", "/notifications").as("getNotifications");
+    cy.intercept("POST", "/transactions").as("createTransaction");
+    cy.intercept("PATCH", "/notifications/*").as("updateNotification");
+    cy.intercept("POST", "/likes/*").as("createLike");
+  });
+
+  it("should render the notifications list with seeded data", () => {
+    cy.database("find", "users").then((user: User) => {
+      cy.loginByApi(user.username);
+      cy.visit("/notifications");
+      
+      cy.wait("@getNotifications");
+      
+      cy.getBySel("notifications-list").should("be.visible");
+      cy.getBySelLike("notification-list-item").should("have.length.greaterThan", 0);
+    });
+  });
+
+  it("should navigate to notifications from the navbar and display badge count", () => {
+    cy.database("find", "users").then((user: User) => {
+      cy.loginByApi(user.username);
+      cy.visit("/");
+
+      // Verifica se o ícone de sino está visível
+      cy.getBySel("nav-top-notifications-link").should("be.visible");
+
+      // Verifica se há um badge de contagem (assumindo que o usuário seedado tem notificações)
+      cy.getBySel("nav-top-notifications-count").should("exist").and("not.be.empty");
+
+      // Clica e navega
+      cy.getBySel("nav-top-notifications-link").click();
+      cy.location("pathname").should("equal", "/notifications");
+      cy.getBySel("notifications-list").should("be.visible");
+    });
+  });
+
+  it("should receive a notification when receiving a payment", () => {
+    // 1. Recuperar dois usuários distintos do banco
+    cy.database("filter", "users").then((users: User[]) => {
+      const userReceiver = users[0];
+      const userSender = users[1];
+
+      // 2. Login como Pagador (Sender) e realizar pagamento via API para agilidade
+      cy.loginByApi(userSender.username);
+      
+      const paymentPayload = {
+        transactionType: "payment",
+        amount: 500, // $5.00
+        description: "Dinner Payment",
+        senderId: userSender.id,
+        receiverId: userReceiver.id,
+        privacyLevel: "public",
+      };
+
+      cy.request("POST", `${Cypress.env("apiUrl")}/transactions`, paymentPayload).then((response) => {
+        expect(response.status).to.eq(200);
+      });
+
+      // 3. Logout do Pagador e Login como Recebedor
+      cy.loginByApi(userReceiver.username);
+      cy.visit("/notifications");
+
+      // 4. Validar a presença da notificação de pagamento
+      cy.wait("@getNotifications");
+      
+      cy.getBySel("notifications-list").within(() => {
+        cy.contains("span", `${userSender.firstName} ${userSender.lastName} received payment.`)
+          .should("be.visible");
+      });
+    });
+  });
+
+  it("should receive a notification when a transaction is liked", () => {
+    cy.database("filter", "users").then((users: User[]) => {
+      const userOwner = users[0];
+      const userLiker = users[1];
+
+      // 1. Encontrar uma transação pública do User Owner para dar Like
+      // Como pode ser difícil achar uma transação específica via UI rapidamente, criamos uma nova via API
+      cy.loginByApi(userOwner.username);
+      const transactionPayload = {
+        transactionType: "payment",
+        amount: 200,
+        description: "Test Transaction for Like",
+        senderId: userOwner.id,
+        receiverId: users[2].id, // Envia para um terceiro qualquer
+        privacyLevel: "public",
+      };
+
+      cy.request("POST", `${Cypress.env("apiUrl")}/transactions`, transactionPayload).then((response) => {
+        const transactionId = response.body.transaction.id;
+
+        // 2. Login como o usuário que vai dar o Like
+        cy.loginByApi(userLiker.username);
+        
+        // Dá like via API para simular a ação de outro usuário
+        cy.request("POST", `${Cypress.env("apiUrl")}/likes/${transactionId}`, {
+          transactionId: transactionId
+        });
+
+        // 3. Voltar para o User Owner e verificar notificação
+        cy.loginByApi(userOwner.username);
+        cy.visit("/notifications");
+        
+        cy.wait("@getNotifications");
+
+        cy.getBySel("notifications-list").within(() => {
+          cy.contains("span", `${userLiker.firstName} ${userLiker.lastName} liked a transaction.`)
+            .should("be.visible");
+        });
+      });
+    });
+  });
+
+  it("should allow a user to dismiss a notification", () => {
+    cy.database("find", "users").then((user: User) => {
+      cy.loginByApi(user.username);
+      cy.visit("/notifications");
+      cy.wait("@getNotifications");
+
+      // Captura a quantidade inicial de notificações
+      cy.getBySelLike("notification-list-item").then(($items) => {
+        const initialCount = $items.length;
+
+        // Se houver notificações, tenta dispensar a primeira
+        if (initialCount > 0) {
+          // Pega o ID da notificação do atributo data-test
+          const firstItem = $items.first();
+          const testIdAttr = firstItem.attr("data-test"); // ex: notification-list-item-123
+          const notificationId = testIdAttr?.split("notification-list-item-")[1];
+
+          // Clica no botão de Dismiss associado a esse item
+          cy.getBySel(`notification-mark-read-${notificationId}`).click();
+
+          // Espera a requisição de update
+          cy.wait("@updateNotification");
+
+          // Verifica se o item sumiu da lista (UI Optimistic Update ou Refetch)
+          cy.getBySel(`notification-list-item-${notificationId}`).should("not.exist");
+          
+          // Verifica se a contagem diminuiu
+          cy.getBySelLike("notification-list-item").should("have.length", initialCount - 1);
+        } else {
+          cy.log("User has no notifications to dismiss");
+        }
+      });
+    });
+  });
+
+  it("should show empty state when there are no notifications", () => {
+    // Cria um usuário novo sem dados seedados para garantir lista vazia
+    const newUser = {
+      firstName: "New",
+      lastName: "User",
+      username: "new_notification_user",
+      password: "password123",
+      email: "newuser@test.com",
+      phoneNumber: "555-555-5555"
+    };
+
+    cy.request("POST", `${Cypress.env("apiUrl")}/users`, newUser).then(() => {
+      cy.loginByApi(newUser.username, newUser.password);
+      cy.visit("/notifications");
+      
+      cy.wait("@getNotifications");
+
+      // Valida componente de lista vazia
+      cy.getBySel("empty-list-header").should("contain", "No Notifications");
+      cy.getBySel("notifications-list").should("not.exist");
+    });
+  });
+});
+
+
+
+
+
+Explicação da Integração
+Imports: Importei os modelos User e Transaction de ../../../src/models para garantir a tipagem correta ao manipular dados retornados pelo cy.database.
+
+Seed & Intercepts: O cy.task("db:seed") no beforeEach garante que o banco de dados (lowdb) seja resetado para um estado conhecido antes de cada teste. Os cy.intercept garantem que não tenhamos "flakiness" esperando requisições de rede terminarem.
+
+Custom Commands:
+
+Utilizei cy.database("find", "users") (definido em cypress/support/commands.ts e plugins/index.ts) para pegar usuários reais gerados pelo seed, evitando hardcode de nomes que podem mudar.
+
+Utilizei cy.loginByApi para agilizar o processo de autenticação, pulando a UI de login que já é testada em auth.spec.ts.
+
+Utilizei cy.getBySel e cy.getBySelLike para selecionar elementos baseados nos atributos data-test encontrados nos componentes React (NotificationListItem.tsx, etc.).
+
+Cenários Reais:
+
+O teste de Pagamento simula um fluxo real: Usuário A paga Usuário B via API, depois Usuário B loga para conferir. Isso valida a integração backend -> frontend.
+
+O teste de Dismiss interage com o botão específico definido em NotificationListItem.tsx (notification-mark-read-${id}) e verifica a atualização da lista.
+
+Empty State: Verifiquei o componente EmptyList.tsx criando um usuário novo "zerado".

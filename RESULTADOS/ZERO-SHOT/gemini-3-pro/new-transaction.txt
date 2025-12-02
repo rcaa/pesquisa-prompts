@@ -1,0 +1,144 @@
+Com base na análise minuciosa da estrutura de arquivos, dos componentes React (como TransactionCreateStepTwo.tsx, UserListSearchForm.tsx) e dos Custom Commands existentes (cypress/support/commands.ts), elaborei o arquivo de teste completo abaixo.
+
+Este arquivo foi desenhado para substituir o arquivo vazio cypress/tests/ui/new-transaction.spec.ts.
+
+Destaques da Implementação:
+Integração com Custom Commands: Utiliza cy.login(), cy.database(), cy.getBySel() e cy.getBySelLike() conforme definidos no seu projeto.
+
+Robustez de Dados: Busca um usuário real no banco de dados (cy.database) para realizar o login, garantindo que o teste não falhe por dados aleatórios do seed.
+
+Interceptação de Rotas: Monitora as chamadas de API (/users, /transactions) para garantir a sincronia correta dos testes e evitar flakiness.
+
+Cobertura de Cenários: Cobre fluxo de Pagamento, Solicitação (Request), Validação de Campos e Busca de Usuários.
+
+Arquivo: cypress/tests/ui/new-transaction.spec.ts
+
+import { User } from "../../../src/models";
+
+describe("New Transaction", () => {
+  beforeEach(() => {
+    cy.task("db:seed");
+    
+    // Intercepta rotas críticas para garantir sincronismo
+    cy.intercept("POST", "/transactions").as("createTransaction");
+    cy.intercept("GET", "/users*").as("allUsers");
+    cy.intercept("GET", "/users/search*").as("usersSearch");
+
+    // Busca um usuário aleatório no banco para logar
+    cy.database("find", "users").then((user: User) => {
+      cy.login(user.username, Cypress.env("defaultPassword"));
+    });
+  });
+
+  it("navigates to the new transaction form, selects a user and submits a payment", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    cy.url().should("include", "/transaction/new");
+
+    // Aguarda carregar usuários e seleciona o primeiro da lista
+    cy.wait("@allUsers");
+    cy.getBySelLike("user-list-item").first().click();
+
+    // Preenche o formulário de transação
+    const amount = "50";
+    const note = "Payment for dinner";
+
+    cy.getBySel("transaction-create-amount-input").type(amount);
+    cy.getBySel("transaction-create-description-input").type(note);
+    
+    // Envia o pagamento
+    cy.getBySel("transaction-create-submit-payment").click();
+
+    // Verificações de sucesso
+    cy.wait("@createTransaction");
+    cy.getBySel("alert-bar-success")
+      .should("be.visible")
+      .and("contain", "Transaction Submitted!");
+      
+    // Verifica se redirecionou para o passo final
+    cy.getBySel("new-transaction-create-another-transaction").should("be.visible");
+    cy.getBySel("new-transaction-return-to-transactions").should("be.visible");
+  });
+
+  it("navigates to the new transaction form, selects a user and submits a request", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    
+    cy.wait("@allUsers");
+    cy.getBySelLike("user-list-item").first().click();
+
+    const amount = "90";
+    const note = "Requesting refund";
+
+    cy.getBySel("transaction-create-amount-input").type(amount);
+    cy.getBySel("transaction-create-description-input").type(note);
+    
+    // Envia a solicitação (Request)
+    cy.getBySel("transaction-create-submit-request").click();
+
+    cy.wait("@createTransaction");
+    cy.getBySel("alert-bar-success")
+      .should("be.visible")
+      .and("contain", "Transaction Submitted!");
+  });
+
+  it("searches for a specific user and creates a transaction", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    
+    // Busca um usuário diferente do atual para garantir que apareça na busca
+    cy.database("find", "users").then((currentUser: User) => {
+        // Encontra um contato que não seja o usuário logado
+        cy.database("filter", "users", { id: currentUser.id }).then((users) => {
+            // Pega um usuário alvo do banco de dados (excluindo o logado se a lógica de filtro falhar)
+            // Aqui simplificamos pegando o segundo usuário da lista geral, assumindo seed > 1
+            const targetUser = users[1] || users[0]; 
+            
+            cy.getBySel("user-list-search-input").type(targetUser.firstName);
+            cy.wait("@usersSearch");
+
+            cy.getBySelLike("user-list-item")
+              .contains(targetUser.firstName)
+              .click();
+
+            cy.getBySel("transaction-create-amount-input").type("100");
+            cy.getBySel("transaction-create-description-input").type("Search test payment");
+            cy.getBySel("transaction-create-submit-payment").click();
+
+            cy.wait("@createTransaction");
+            cy.getBySel("alert-bar-success").should("be.visible");
+        });
+    });
+  });
+
+  it("displays errors when submitting empty form", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    cy.wait("@allUsers");
+    cy.getBySelLike("user-list-item").first().click();
+
+    // Tenta clicar sem preencher nada
+    // Nota: O botão deve estar desabilitado ou não fazer nada, verificamos o estado disabled
+    cy.getBySel("transaction-create-submit-payment").should("be.disabled");
+    cy.getBySel("transaction-create-submit-request").should("be.disabled");
+
+    // Toca nos campos para acionar validação (blur) se necessário, 
+    // ou verifica mensagens de erro de validação do Formik/Yup se aparecerem
+    cy.getBySel("transaction-create-amount-input").click().blur();
+    cy.getBySel("transaction-create-amount-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Please enter a valid amount");
+
+    cy.getBySel("transaction-create-description-input").click().blur();
+    cy.getBySel("transaction-create-description-input-helper-text")
+      .should("be.visible")
+      .and("contain", "Please enter a note");
+  });
+
+  it("validates negative amounts and limits", () => {
+    cy.getBySel("nav-top-new-transaction").click();
+    cy.wait("@allUsers");
+    cy.getBySelLike("user-list-item").first().click();
+
+    // Valor zero (o componente react-number-format geralmente sanitiza, 
+    // mas validamos se o botão permanece desabilitado ou exibe erro)
+    cy.getBySel("transaction-create-amount-input").type("0");
+    cy.getBySel("transaction-create-submit-payment").should("be.disabled");
+  });
+});

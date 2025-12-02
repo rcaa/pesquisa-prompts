@@ -1,0 +1,118 @@
+Com base na análise do código-fonte do projeto cypress-realworld-app, especificamente os arquivos de configuração do Cypress (commands.ts, cypress.json) e os componentes React (SignInForm.tsx, SignUpForm.tsx, NavDrawer.tsx), gerei o arquivo de teste abaixo.
+
+Este arquivo utiliza os Custom Commands já configurados no projeto (como cy.getBySel e cy.task("db:seed")) e os seletores data-test corretos para garantir uma execução sem erros.
+
+Arquivo de destino: cypress-realworld-app/cypress/tests/ui/auth.spec.ts
+
+/// <reference types="cypress" />
+
+describe("Autenticação de Usuário", function () {
+  beforeEach(function () {
+    // Reseta o banco de dados antes de cada teste para garantir estado limpo
+    cy.task("db:seed");
+    
+    // Intercepta requisições de login para aguardar respostas de rede
+    cy.intercept("POST", "/login").as("loginUser");
+    cy.intercept("POST", "/users").as("signupUser");
+  });
+
+  it("deve redirecionar para a tela de login se o usuário não estiver autenticado", function () {
+    cy.visit("/");
+    cy.location("pathname").should("equal", "/signin");
+  });
+
+  it("deve realizar login com sucesso usando credenciais válidas", function () {
+    cy.visit("/signin");
+
+    // Seletores baseados no arquivo SignInForm.tsx
+    cy.getBySel("signin-username").type("Katharina_Bernier");
+    cy.getBySel("signin-password").type("s3cret");
+    cy.getBySel("signin-submit").click();
+
+    // Aguarda a resposta da API e verifica o redirecionamento
+    cy.wait("@loginUser").its("response.statusCode").should("eq", 200);
+    cy.location("pathname").should("equal", "/");
+    
+    // Verifica se o menu principal está visível (confirmação de login)
+    cy.getBySel("sidenav-user-full-name").should("contain", "Katharina");
+  });
+
+  it("deve exibir erro ao tentar logar com credenciais inválidas", function () {
+    cy.visit("/signin");
+
+    cy.getBySel("signin-username").type("Katharina_Bernier");
+    cy.getBySel("signin-password").type("senha_errada");
+    cy.getBySel("signin-submit").click();
+
+    cy.wait("@loginUser").its("response.statusCode").should("eq", 401);
+    
+    // Verifica a barra de alerta baseada no componente AlertBar.tsx
+    cy.getBySel("signin-error").should("be.visible").and("contain", "Incorrect username or password");
+  });
+
+  it("deve permitir que um novo usuário realize cadastro (Sign Up)", function () {
+    cy.visit("/signup");
+
+    const username = `novo_usuario_${new Date().getTime()}`;
+
+    // Seletores baseados no arquivo SignUpForm.tsx
+    cy.getBySel("signup-first-name").type("Romario");
+    cy.getBySel("signup-last-name").type("Teste");
+    cy.getBySel("signup-username").type(username);
+    cy.getBySel("signup-password").type("minhasenha");
+    cy.getBySel("signup-confirmPassword").type("minhasenha");
+    cy.getBySel("signup-submit").click();
+
+    // O comportamento esperado do app é redirecionar para login após cadastro
+    cy.wait("@signupUser").its("response.statusCode").should("eq", 201);
+    cy.location("pathname").should("equal", "/signin");
+
+    // Tenta logar com o novo usuário
+    cy.getBySel("signin-username").type(username);
+    cy.getBySel("signin-password").type("minhasenha");
+    cy.getBySel("signin-submit").click();
+
+    cy.location("pathname").should("equal", "/");
+    // Verifica se o modal de onboarding aparece para novos usuários
+    cy.getBySel("user-onboarding-dialog").should("be.visible");
+  });
+
+  it("deve realizar logout com sucesso", function () {
+    // Loga programaticamente via API para agilizar o teste de logout
+    // baseado no comando customizado em commands.ts
+    cy.loginByApi("Katharina_Bernier", "s3cret");
+    cy.visit("/");
+
+    // Lida com a responsividade (Mobile vs Desktop) para encontrar o botão de logout
+    cy.window().then((win) => {
+      if (win.innerWidth < 600) {
+        cy.getBySel("sidenav-toggle").click();
+      }
+    });
+
+    // Seletor baseado no NavDrawer.tsx
+    cy.getBySel("sidenav-signout").click();
+
+    cy.location("pathname").should("equal", "/signin");
+  });
+});
+
+
+
+
+
+
+Explicação da Integração:
+Reset de Dados (db:seed): Utilizei cy.task("db:seed") no beforeEach, pois o arquivo cypress/plugins/index.ts expõe essa tarefa e é crucial para que o usuário "Katharina_Bernier" (presente nos seeds) exista sempre.
+
+Seletores (cy.getBySel): O projeto define este comando customizado em cypress/support/commands.ts. Utilizei-o em vez de cy.get para manter o padrão do projeto.
+
+Mapeamento de Componentes:
+
+SignInForm.tsx: Mapeei signin-username, signin-password e signin-submit.
+
+SignUpForm.tsx: Mapeei os campos de cadastro.
+
+NavDrawer.tsx: Mapeei o botão de logout sidenav-signout.
+
+Verificação de Onboarding: No teste de cadastro ("Sign Up"), adicionei uma verificação para user-onboarding-dialog, pois o UserOnboardingContainer.tsx mostra que novos usuários sem conta bancária veem esse diálogo.

@@ -1,0 +1,100 @@
+Com base na análise profunda da estrutura do projeto cypress-realworld-app (RWA), especialmente nos arquivos src/components/BankAccountForm.tsx, src/components/BankAccountList.tsx, backend/bankaccount-routes.ts e cypress/support/commands.ts, desenvolvi o arquivo de teste funcional completo.
+
+Este arquivo deve ser salvo em: cypress/tests/ui/bankaccounts.spec.ts
+
+Detalhes da Implementação:
+Integração com Comandos Personalizados: Utiliza cy.loginByApi, cy.database e cy.getBySel conforme definido em cypress/support/commands.ts.
+
+Massa de Dados: Utiliza cy.task("db:seed") para garantir um estado limpo antes de cada teste.
+
+Seletores Precisos: Baseado nos atributos data-test encontrados nos componentes React (ex: bankaccount-bankName-input, bankaccount-submit).
+
+Validações de Regra de Negócio: Testa as validações do Yup definidas no BankAccountForm.tsx (tamanho mínimo de caracteres, obrigatoriedade).
+
+/// <reference types="cypress" />
+
+import { User } from "../../../src/models";
+
+describe("Bank Accounts", () => {
+  let user: User;
+
+  beforeEach(() => {
+    // 1. Reseta o banco de dados para o estado inicial
+    cy.task("db:seed");
+
+    // 2. Busca um usuário no banco para realizar o login via API
+    // Katharina_Bernier é geralmente o user[0] no seed padrão, mas buscamos dinamicamente para robustez
+    cy.database("find", "users").then((userResult: User) => {
+      user = userResult;
+      
+      // 3. Login via API para performance (bypass na UI de login)
+      cy.loginByApi(user.username, "s3cret");
+      
+      // 4. Visita a página de contas bancárias
+      cy.visit("/bankaccounts");
+    });
+  });
+
+  it("creates a new bank account", () => {
+    // Verifica se o botão de criar existe e clica
+    cy.getBySel("bankaccount-new").should("be.visible").click();
+
+    // Valida redirecionamento para a rota correta
+    cy.location("pathname").should("equal", "/bankaccounts/new");
+
+    // Preenche o formulário com dados válidos
+    cy.getBySel("bankaccount-bankName-input").type("The Great Cypress Bank");
+    cy.getBySel("bankaccount-routingNumber-input").type("987654321");
+    cy.getBySel("bankaccount-accountNumber-input").type("123456789");
+
+    // Submete o formulário
+    cy.getBySel("bankaccount-submit").click();
+
+    // Valida se retornou para a lista
+    cy.location("pathname").should("equal", "/bankaccounts");
+
+    // Valida se a nova conta aparece na lista
+    cy.getBySel("bankaccount-list").should("contain", "The Great Cypress Bank");
+  });
+
+  it("should display bank account form validation errors", () => {
+    cy.getBySel("bankaccount-new").click();
+
+    // Tenta submeter sem preencher nada (Touch nos campos)
+    cy.getBySel("bankaccount-bankName-input").focus().blur();
+    cy.getBySel("bankaccount-routingNumber-input").focus().blur();
+    cy.getBySel("bankaccount-accountNumber-input").focus().blur();
+
+    // Valida mensagens de campo obrigatório definidas no Yup schema (BankAccountForm.tsx)
+    cy.get("#bankaccount-bankName-input-helper-text").should("contain", "Enter a bank name");
+    cy.get("#bankaccount-routingNumber-input-helper-text").should("contain", "Enter a valid bank routing number");
+    cy.get("#bankaccount-accountNumber-input-helper-text").should("contain", "Enter a valid bank account number");
+    
+    // O botão deve estar desabilitado se o formulário for inválido
+    cy.getBySel("bankaccount-submit").should("be.disabled");
+
+    // Testa validação de tamanho mínimo (Bank Name < 5 chars)
+    cy.getBySel("bankaccount-bankName-input").type("ABC");
+    cy.get("#bankaccount-bankName-input-helper-text").should("contain", "Must contain at least 5 characters");
+
+    // Testa validação de tamanho exato (Routing Number !== 9 chars)
+    cy.getBySel("bankaccount-routingNumber-input").type("123");
+    cy.get("#bankaccount-routingNumber-input-helper-text").should("contain", "Must contain a valid routing number");
+  });
+
+  it("soft deletes a bank account", () => {
+    // Primeiro, verifica se existem contas na lista (o seed deve criar pelo menos uma)
+    cy.getBySel("bankaccount-list-item-").should("have.length.greaterThan", 0);
+
+    // Captura o primeiro item da lista para verificar sua remoção visual
+    cy.getBySel("bankaccount-delete").first().click();
+
+    // Valida visualmente que o item foi marcado como deletado
+    // Nota: No componente BankAccountItem.tsx, o texto muda para "(Deleted)" ou o botão some
+    // A lógica do app apenas faz um soft delete, então verificamos se o botão de delete sumiu para aquele item
+    cy.getBySel("bankaccount-delete").should("have.length.lessThan", 1); 
+    
+    // Opcional: Verificar se o texto (Deleted) apareceu
+    cy.getBySel("bankaccount-list").should("contain", "(Deleted)");
+  });
+});

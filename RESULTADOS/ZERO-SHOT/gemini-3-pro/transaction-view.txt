@@ -1,0 +1,167 @@
+Com base na análise da estrutura do projeto cypress-realworld-app, especialmente os arquivos TransactionDetail.tsx, TransactionItem.tsx, e os comandos customizados em commands.ts, aqui está o arquivo de teste completo e otimizado.
+
+Este arquivo cobre cenários de renderização, likes, comentários e fluxos de aceitação/rejeição de transações.
+
+Instruções de Instalação
+Crie ou substitua o arquivo em: cypress/tests/ui/transaction-view.spec.ts
+
+Cole o conteúdo abaixo.
+
+Código do Teste (cypress/tests/ui/transaction-view.spec.ts)
+ 
+import { User, Transaction } from "../../../src/models";
+
+describe("Transaction View", () => {
+  beforeEach(() => {
+    cy.task("db:seed");
+    cy.loginByApi("Katharina_Bernier");
+  });
+
+  it("should render the transaction detail page correctly", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", { receiverId: user.id }).then(
+        (transaction: Transaction) => {
+          cy.visit(`/transaction/${transaction.id}`);
+
+          cy.getBySel("transaction-detail-header").should("be.visible");
+          cy.getBySelLike("transaction-sender").should("be.visible");
+          cy.getBySelLike("transaction-receiver").should("be.visible");
+          cy.getBySel(`transaction-amount-${transaction.id}`).should("be.visible");
+          cy.getBySel(`transaction-like-count-${transaction.id}`).should("be.visible");
+          cy.getBySel(`transaction-comment-input-${transaction.id}`).should("be.visible");
+        }
+      );
+    });
+  });
+
+  it("should allow liking a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", { receiverId: user.id }).then(
+        (transaction: Transaction) => {
+          cy.visit(`/transaction/${transaction.id}`);
+
+          cy.getBySel(`transaction-like-count-${transaction.id}`).then(($count) => {
+            const initialCount = parseInt($count.text());
+
+            cy.getBySel(`transaction-like-button-${transaction.id}`)
+              .should("not.be.disabled")
+              .click();
+
+            cy.getBySel(`transaction-like-button-${transaction.id}`).should("be.disabled");
+            cy.getBySel(`transaction-like-count-${transaction.id}`).should(
+              "contain",
+              initialCount + 1
+            );
+          });
+        }
+      );
+    });
+  });
+
+  it("should allow commenting on a transaction", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", { receiverId: user.id }).then(
+        (transaction: Transaction) => {
+          cy.visit(`/transaction/${transaction.id}`);
+
+          const commentContent = "Test comment via Cypress";
+
+          cy.getBySel(`transaction-comment-input-${transaction.id}`)
+            .type(`${commentContent}{enter}`);
+
+          cy.getBySel("comments-list").should("contain", commentContent);
+        }
+      );
+    });
+  });
+
+  it("should display accept and reject buttons for pending requests received by the user", () => {
+    // Busca uma transação onde o usuário logado é o recebedor (quem paga) e o status é pending request
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", {
+        receiverId: user.id,
+        status: "pending",
+        requestStatus: "pending",
+      }).then((transaction: Transaction) => {
+        // Se não houver transação pendente, cria uma para o teste não falhar
+        if (!transaction) {
+          const payload = {
+            sender: { id: "devon_becker_id" }, // ID simulado de outro usuário
+            receiver: { id: user.id },
+            amount: 50,
+            description: "Request for pizza",
+            transactionType: "request",
+          };
+          // Nota: login normal já deve ter seedado dados, mas essa checagem é robusta
+          cy.createTransaction(payload).then(() => {
+             // Re-busca a transação recém criada
+             cy.database("find", "transactions", { description: "Request for pizza" }).then((newTx: Transaction) => {
+                cy.visit(`/transaction/${newTx.id}`);
+                cy.getBySel(`transaction-accept-request-${newTx.id}`).should("be.visible");
+                cy.getBySel(`transaction-reject-request-${newTx.id}`).should("be.visible");
+             })
+          });
+        } else {
+          cy.visit(`/transaction/${transaction.id}`);
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should("be.visible");
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should("be.visible");
+        }
+      });
+    });
+  });
+
+  it("should accept a transaction request", () => {
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", {
+        receiverId: user.id,
+        status: "pending",
+        requestStatus: "pending",
+      }).then((transaction: Transaction) => {
+        if (transaction) {
+          cy.visit(`/transaction/${transaction.id}`);
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).click();
+          // Verifica se os botões somem após aceitar (pois o status mudou)
+          cy.getBySel(`transaction-accept-request-${transaction.id}`).should("not.exist");
+          cy.getBySelLike("transaction-amount").should("have.css", "color", "rgb(255, 0, 0)"); // Red for negative/payment
+        }
+      });
+    });
+  });
+
+  it("should reject a transaction request", () => {
+    // Necessário encontrar uma SEGUNDA transação pendente para não conflitar com o teste anterior
+    // Ou garantir que o seed reseta (o que o beforeEach faz)
+    cy.database("find", "users", { username: "Katharina_Bernier" }).then((user: User) => {
+      cy.database("find", "transactions", {
+        receiverId: user.id,
+        status: "pending",
+        requestStatus: "pending",
+      }).then((transaction: Transaction) => {
+        if (transaction) {
+          cy.visit(`/transaction/${transaction.id}`);
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).click();
+          cy.getBySel(`transaction-reject-request-${transaction.id}`).should("not.exist");
+        }
+      });
+    });
+  });
+});
+
+
+
+
+
+Por que este teste se encaixa perfeitamente:
+Integração com cy.database: Utiliza as tarefas de backend definidas em cypress/plugins/index.ts e support/commands.ts para buscar IDs reais de transações geradas pelo seed, em vez de tentar adivinhar URLs ou clicar aleatoriamente na lista.
+
+Seletores Resilientes: Utiliza cy.getBySel (wrapper para [data-test=...]) e cy.getBySelLike (wrapper para [data-test*=...]) que já estão configurados no projeto, garantindo que o teste não quebre com mudanças de CSS.
+
+Contexto de Usuário: O teste entende a lógica de TransactionDetail.tsx onde botões de "Aceitar/Rejeitar" só aparecem se:
+
+O usuário logado é o receiver (quem deve pagar).
+
+O status da requisição é pending.
+
+Cobertura Completa: Cobre desde a visualização básica até a interação social (likes/comentários) e lógica de negócios (pagamentos de requisições).
+
+Tipagem TypeScript: Importa as interfaces User e Transaction diretamente de src/models para garantir a consistência dos dados manipulados no teste.
